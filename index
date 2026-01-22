@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Off-Road Dashboard (Portrait)</title>
+    
+    <link rel="apple-touch-icon" href="app-icon.png">
+
+    <style>
+        /* --- THEME & RESET --- */
+        :root {
+            --bg-color: #f0f2f5;
+            --card-bg: #ffffff;
+            --text-primary: #1c1c1e;
+            --text-secondary: #8e8e93;
+            --accent-blue: #007aff;
+            --accent-red: #ff3b30;
+            --accent-yellow: #ffcc00;
+            --gauge-tick: #333;
+        }
+
+        body {
+            margin: 0; padding: 0;
+            background-color: var(--bg-color); color: var(--text-primary);
+            font-family: "Avenir Next", -apple-system, system-ui, BlinkMacSystemFont, Roboto, sans-serif;
+            overflow: hidden; 
+            width: 100vw; 
+            height: 100dvh; 
+            -webkit-user-select: none; user-select: none;
+        }
+
+        /* --- LANDSCAPE WARNING (New!) --- */
+        #landscape-warning {
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100dvh;
+            background: #000; color: #fff; z-index: 9999;
+            display: none; flex-direction: column; align-items: center; justify-content: center;
+            text-align: center; padding: 20px;
+        }
+        #landscape-warning svg { width: 60px; height: 60px; margin-bottom: 20px; fill: white; animation: rotatePhone 2s infinite; }
+        @keyframes rotatePhone { 0% { transform: rotate(-90deg); } 50% { transform: rotate(0deg); } 100% { transform: rotate(-90deg); } }
+        
+        /* Show warning only if user rotates to landscape */
+        @media (orientation: landscape) {
+            #landscape-warning { display: flex; }
+            .app-container { display: none; }
+        }
+
+        /* --- SWIPE CONTAINER --- */
+        .app-container {
+            width: 100vw; height: 100dvh;
+            overflow-x: scroll; overflow-y: hidden;
+            scroll-snap-type: x mandatory;
+            display: flex;
+            scrollbar-width: none;
+        }
+        .app-container::-webkit-scrollbar { display: none; }
+
+        /* --- PAGES --- */
+        .page {
+            min-width: 100vw; height: 100dvh;
+            scroll-snap-align: start;
+            padding: 15px; box-sizing: border-box;
+            display: flex; flex-direction: column; justify-content: center;
+            position: relative;
+        }
+
+        /* --- VERSION NUMBER --- */
+        .version-number {
+            position: absolute; bottom: 10px; right: 15px;
+            font-size: 0.7rem; color: var(--text-secondary); opacity: 0.5;
+            font-family: "Menlo", monospace; pointer-events: none;
+        }
+
+        /* --- PAGE 1: GAUGES (STACKED) --- */
+        .page-1-layout {
+            display: grid;
+            /* CHANGED: 1 column, rows for gauges + controls */
+            grid-template-columns: 1fr; 
+            grid-template-rows: 1fr 1fr auto; 
+            gap: 10px; height: 100%;
+            padding-bottom: 20px;
+        }
+
+        .gauges-container {
+            /* Now spans 1 column, but we don't need the container styling as much in vertical stack */
+            display: contents; /* Lets children participate in main grid */
+        }
+
+        /* Wrapper for each gauge to center it */
+        .gauge-wrapper-cell {
+            display: flex; justify-content: center; align-items: center;
+            background: var(--card-bg); border-radius: 24px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.05);
+            position: relative;
+        }
+
+        .controls-container {
+            display: flex; justify-content: center; gap: 20px;
+            padding-top: 10px;
+        }
+
+        /* --- GAUGE VISUALS --- */
+        .gauge-wrapper {
+            position: relative;
+            /* Scaled for portrait width */
+            width: 75vw; height: 75vw;
+            max-width: 35vh; max-height: 35vh;
+        }
+        svg.gauge { width: 100%; height: 100%; overflow: visible; }
+        
+        .gauge-value {
+            position: absolute; top: 0%; left: 50%; transform: translateX(-50%);
+            font-size: 2.2rem; font-weight: 800; font-variant-numeric: tabular-nums;
+            z-index: 5; text-shadow: 0 2px 10px rgba(255,255,255,1);
+        }
+        
+        .gauge-label {
+            position: absolute; bottom: 10%; left: 50%; transform: translateX(-50%);
+            font-size: 1rem; font-weight: 700; color: var(--text-secondary); letter-spacing: 1px;
+            z-index: 4;
+        }
+
+        .car-icon {
+            position: absolute; top: 60%; left: 50%;
+            transform: translate(-50%, -50%);
+            transition: transform 0.1s cubic-bezier(0.1, 0.7, 1.0, 0.1);
+            z-index: 2; pointer-events: none;
+        }
+        #roll-car { width: 75%; }
+        #pitch-car { width: 100%; }
+
+        .gauge-tick { stroke: var(--gauge-tick); stroke-linecap: round; }
+        .zone-yellow { fill: none; stroke: var(--accent-yellow); stroke-width: 6; opacity: 0.5; }
+        .zone-red { fill: none; stroke: var(--accent-red); stroke-width: 6; opacity: 0.5; }
+        .gauge-needle { fill: var(--accent-red); filter: drop-shadow(0px 2px 2px rgba(0,0,0,0.3)); transition: transform 0.1s linear; }
+
+        /* --- PAGE 2: GRAPH (STACKED) --- */
+        .page-2-layout {
+            display: grid;
+            /* CHANGED: Stacked Rows (Graph on top, Info below) */
+            grid-template-columns: 1fr;
+            grid-template-rows: 1.5fr 1fr; 
+            gap: 15px; height: 100%;
+            padding-bottom: 20px;
+        }
+
+        .graph-card {
+            background: var(--card-bg); border-radius: 24px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.05);
+            padding: 15px; display: flex; flex-direction: column;
+            overflow: hidden; height: 100%;
+        }
+        
+        .graph-header {
+            font-size: 0.9rem; font-weight: 600; color: var(--text-secondary);
+            margin-bottom: 5px; display: flex; justify-content: space-between;
+        }
+
+        .info-card {
+            background: var(--card-bg); border-radius: 24px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.05);
+            padding: 15px;
+            /* Grid layout for info items in portrait */
+            display: grid; grid-template-columns: 1fr 1fr; gap: 15px;
+            align-items: center;
+        }
+
+        /* Make the Hard Hits span full width in the info card */
+        .info-card .stat-group:last-child {
+            grid-column: 1 / -1;
+            align-items: center;
+            border-top: 1px solid #f0f0f0;
+            padding-top: 10px;
+        }
+
+        .stat-group { display: flex; flex-direction: column; }
+        .stat-label { font-size: 0.7rem; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; margin-bottom: 2px; }
+        .stat-value { font-size: 1.4rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+        .stat-value.large { font-size: 2.8rem; line-height: 1; }
+        .stat-unit { font-size: 0.8rem; color: var(--text-secondary); margin-left: 3px; }
+
+        /* --- BUTTONS --- */
+        .btn {
+            padding: 15px 30px; border-radius: 15px; border: none;
+            font-size: 1rem; font-weight: 600; cursor: pointer;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+            transition: transform 0.1s;
+        }
+        .btn:active { transform: scale(0.95); }
+        .btn-primary { background: var(--accent-blue); color: white; }
+        .btn-secondary { background: white; color: var(--accent-blue); }
+
+        /* --- PAGINATION DOTS --- */
+        .pagination {
+            position: fixed; bottom: 8px; left: 0; width: 100%;
+            display: flex; justify-content: center; gap: 8px; pointer-events: none; z-index: 10;
+        }
+        .dot { width: 8px; height: 8px; background: rgba(0,0,0,0.2); border-radius: 50%; }
+        .dot.active { background: var(--accent-blue); }
+
+    </style>
+</head>
+<body>
+
+    <div id="landscape-warning">
+        <svg viewBox="0 0 24 24"><path d="M17 1.01L7 1c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-1.99-2-1.99zM17 19H7V5h10v14z"/></svg>
+        <h3>Please Rotate to Portrait</h3>
+        <p>Keep phone vertical.</p>
+    </div>
+
+    <div class="app-container" id="scroller">
+        
+        <div class="page page-1">
+            <div class="page-1-layout">
+                
+                <div class="gauge-wrapper-cell">
+                    <div class="gauge-wrapper">
+                        <div class="gauge-value" id="roll-text">0°</div>
+                        <svg class="gauge" viewBox="0 0 100 100" id="roll-svg"></svg>
+                        <img src="4runner-rear-trans.png" class="car-icon" id="roll-car">
+                        <div class="gauge-label">ROLL</div>
+                    </div>
+                </div>
+
+                <div class="gauge-wrapper-cell">
+                    <div class="gauge-wrapper">
+                        <div class="gauge-value" id="pitch-text">0°</div>
+                        <svg class="gauge" viewBox="0 0 100 100" id="pitch-svg"></svg>
+                        <img src="4runner-side-trans.png" class="car-icon" id="pitch-car">
+                        <div class="gauge-label">PITCH</div>
+                    </div>
+                </div>
+
+                <div class="controls-container">
+                    <button class="btn btn-secondary" onclick="tareLevel()">Tare</button>
+                    <button class="btn btn-primary" onclick="startApp()">Start</button>
+                </div>
+            </div>
+            <div class="version-number">v2.0-Portrait</div>
+        </div>
+
+        <div class="page page-2">
+            <div class="page-2-layout">
+                
+                <div class="graph-card">
+                    <div class="graph-header">
+                        <span>Ride Harshness Index (m/s²)</span>
+                        <span>Live</span>
+                    </div>
+                    <div style="flex-grow: 1; position: relative; width: 100%; height: 100%;">
+                        <canvas id="rhiGraph"></canvas>
+                    </div>
+                </div>
+
+                <div class="info-card">
+                    <div class="stat-group">
+                        <span class="stat-label">Speed</span>
+                        <div class="stat-value large"><span id="speedValue">0</span><span class="stat-unit">MPH</span></div>
+                    </div>
+                    <div class="stat-group">
+                        <span class="stat-label">GPS</span>
+                        <div class="stat-value" style="font-size: 0.85rem; font-family: monospace; line-height: 1.2;">
+                            <div id="lat">N --.----</div>
+                            <div id="lon">W ---.----</div>
+                        </div>
+                    </div>
+                    <div class="stat-group">
+                        <span class="stat-label" style="color: var(--accent-red)">Hard Hits</span>
+                        <div class="stat-value" id="hits" style="color: var(--accent-red); font-size: 2.5rem;">0</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <div class="pagination">
+        <div class="dot active" id="dot1"></div>
+        <div class="dot" id="dot2"></div>
+    </div>
+
+    <script>
+        // --- CONFIGURATION ---
+        // PORTRAIT MODE LOGIC:
+        // BETA (Front/Back Tilt) = PITCH
+        // GAMMA (Left/Right Tilt) = ROLL
+        // Direction Multiplier (-1 flips direction)
+        const rollDirection = 1;  
+        const pitchDirection = 1; 
+
+        // Thresholds
+        const yellowThreshold = 30; 
+        const redThreshold = 40;    
+        const hardHitThreshold = 18; 
+
+        // --- GLOBAL STATE ---
+        let tarePitch = 0;
+        let tareRoll = 0;
+        let hardHitCount = 0;
+        let lastHitTime = 0; 
+        let isRunning = false;
+        
+        const maxDataPoints = 300; 
+        let rhiData = new Array(maxDataPoints).fill(0);
+
+        const scroller = document.getElementById('scroller');
+        scroller.addEventListener('scroll', () => {
+            const page2 = scroller.scrollWidth / 2;
+            if (scroller.scrollLeft > page2 / 2) {
+                document.getElementById('dot1').classList.remove('active');
+                document.getElementById('dot2').classList.add('active');
+            } else {
+                document.getElementById('dot1').classList.add('active');
+                document.getElementById('dot2').classList.remove('active');
+            }
+        });
+
+
+        // --- 1. SENSOR LOGIC ---
+        function startApp() {
+            if (isRunning) return;
+            if ('wakeLock' in navigator) navigator.wakeLock.request('screen').catch(console.error);
+
+            if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+                DeviceMotionEvent.requestPermission()
+                    .then(state => {
+                        if (state === 'granted') enableSensors();
+                        else alert("Permission denied. Reset and try again.");
+                    })
+                    .catch(console.error);
+            } else {
+                enableSensors();
+            }
+        }
+
+        function enableSensors() {
+            isRunning = true;
+            window.addEventListener('deviceorientation', handleOrientation);
+            window.addEventListener('devicemotion', handleMotion);
+            
+            if (navigator.geolocation) {
+                navigator.geolocation.watchPosition(updateGPS, err => console.log(err), {
+                    enableHighAccuracy: true, maximumAge: 0
+                });
+            }
+            
+            requestAnimationFrame(updateGraphLoop);
+            document.querySelector('.btn-primary').innerText = "Running";
+            document.querySelector('.btn-primary').style.background = "#34c759";
+        }
+
+        function handleOrientation(event) {
+            // PORTRAIT MAPPING
+            // Beta = X Axis (Front/Back) -> Pitch
+            // Gamma = Y Axis (Left/Right) -> Roll
+            let rawBeta = event.beta || 0;
+            let rawGamma = event.gamma || 0;
+
+            let currentPitch = (rawBeta - tarePitch) * pitchDirection;
+            let currentRoll = (rawGamma - tareRoll) * rollDirection;
+
+            // Update Text
+            document.getElementById('roll-text').innerText = Math.round(currentRoll) + "°";
+            document.getElementById('pitch-text').innerText = Math.round(currentPitch) + "°";
+
+            // Update Car Images
+            document.getElementById('roll-car').style.transform = 
+                `translate(-50%, -50%) rotate(${currentRoll}deg)`;
+            
+            // Pitch (Side View): Positive Pitch is Nose Up
+            // Usually we rotate UP (counter-clockwise) for nose up
+            document.getElementById('pitch-car').style.transform = 
+                `translate(-50%, -50%) rotate(${-currentPitch}deg)`;
+
+            // Update Needles
+            updateNeedle('roll-svg', currentRoll);
+            updateNeedle('pitch-svg', -currentPitch); 
+        }
+
+        function updateNeedle(svgId, angle) {
+            const svg = document.getElementById(svgId);
+            const needle = svg.querySelector('.gauge-needle');
+            if(needle) {
+                needle.setAttribute('transform', `rotate(${angle}, 50, 50)`);
+            }
+        }
+
+        // --- TARE LOGIC ---
+        function tareLevel() {
+            const btn = document.querySelector('.btn-secondary');
+            
+            btn.innerText = "Steady...";
+            btn.style.backgroundColor = "var(--accent-yellow)";
+            
+            setTimeout(() => {
+                window.addEventListener('deviceorientation', function handler(event) {
+                    
+                    // Capture raw values (Portrait Mapping)
+                    tarePitch = event.beta || 0;
+                    tareRoll = event.gamma || 0;
+                    
+                    window.removeEventListener('deviceorientation', handler);
+                    
+                    // Force Zero Visuals
+                    document.getElementById('roll-text').innerText = "0°";
+                    document.getElementById('pitch-text').innerText = "0°";
+                    document.getElementById('roll-car').style.transform = "translate(-50%, -50%) rotate(0deg)";
+                    document.getElementById('pitch-car').style.transform = "translate(-50%, -50%) rotate(0deg)";
+                    updateNeedle('roll-svg', 0);
+                    updateNeedle('pitch-svg', 0);
+
+                    btn.innerText = "Level Set!";
+                    setTimeout(() => { 
+                        btn.innerText = "Tare"; 
+                        btn.style.backgroundColor = "white";
+                    }, 1000);
+                    
+                }, { once: true });
+            }, 1000);
+        }
+
+
+        // --- 2. ACCELEROMETER / RHI ---
+        function handleMotion(event) {
+            const x = event.acceleration.x || 0;
+            const y = event.acceleration.y || 0;
+            const z = event.acceleration.z || 0;
+            const magnitude = Math.sqrt(x*x + y*y + z*z);
+            
+            rhiData.push(magnitude);
+            if(rhiData.length > maxDataPoints) rhiData.shift();
+
+            if (magnitude > hardHitThreshold) {
+                const now = Date.now();
+                if (now - lastHitTime > 1000) { 
+                    hardHitCount++;
+                    document.getElementById('hits').innerText = hardHitCount;
+                    lastHitTime = now;
+                }
+            }
+        }
+
+
+        // --- 3. GPS ---
+        function updateGPS(pos) {
+            const s = pos.coords.speed || 0; 
+            document.getElementById('speedValue').innerText = (s * 2.237).toFixed(0);
+            document.getElementById('lat').innerText = `N ${pos.coords.latitude.toFixed(4)}`;
+            document.getElementById('lon').innerText = `W ${Math.abs(pos.coords.longitude).toFixed(4)}`;
+        }
+
+
+        // --- 4. GRAPH & VISUALS ---
+        const canvas = document.getElementById('rhiGraph');
+        const ctx = canvas.getContext('2d');
+        
+        function resizeCanvas() {
+            const parent = canvas.parentElement;
+            canvas.width = parent.clientWidth * window.devicePixelRatio;
+            canvas.height = parent.clientHeight * window.devicePixelRatio;
+            ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+            canvas.logicalW = parent.clientWidth;
+            canvas.logicalH = parent.clientHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        setTimeout(resizeCanvas, 500); 
+
+        function updateGraphLoop() {
+            const w = canvas.logicalW; const h = canvas.logicalH;
+            if(!w) { requestAnimationFrame(updateGraphLoop); return; }
+
+            ctx.clearRect(0,0,w,h);
+
+            // Zones
+            const yScale = h / 20;
+            ctx.fillStyle = "rgba(52, 199, 89, 0.1)"; ctx.fillRect(0, h-(8*yScale), w, 8*yScale);
+            ctx.fillStyle = "rgba(255, 204, 0, 0.1)"; ctx.fillRect(0, h-(16*yScale), w, 8*yScale);
+            ctx.fillStyle = "rgba(255, 59, 48, 0.1)"; ctx.fillRect(0, 0, w, 4*yScale);
+
+            // Labels
+            ctx.fillStyle = "#8e8e93"; ctx.font = "10px sans-serif";
+            ctx.textAlign = "right"; 
+            ctx.fillText("20", 20, 15);
+            ctx.fillText("10", 20, h - 10*yScale);
+            ctx.textAlign = "center";
+            ctx.fillText("5s", 20, h - 5);
+            ctx.fillText("Now", w - 20, h - 5);
+
+            // Line
+            ctx.strokeStyle = "#333"; ctx.lineWidth = 2; ctx.beginPath();
+            const step = w / maxDataPoints;
+            
+            for(let i=0; i<rhiData.length; i++) {
+                const val = Math.min(rhiData[i], 20);
+                const x = i * step;
+                const y = h - (val * yScale);
+                if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+            }
+            ctx.stroke();
+
+            requestAnimationFrame(updateGraphLoop);
+        }
+
+        // --- 5. INITIALIZE SVG GAUGES ---
+        function drawGauge(svgId) {
+            const svg = document.getElementById(svgId);
+            const cx = 50, cy = 50, r = 45;
+            const SVG_NS = "http://www.w3.org/2000/svg";
+
+            function polar(angle) {
+                const rad = (angle-90) * Math.PI / 180.0;
+                return { x: cx + (r * Math.cos(rad)), y: cy + (r * Math.sin(rad)) };
+            }
+            function zoneArc(start, end, radius) {
+                const radStart = (start-90)*Math.PI/180;
+                const radEnd = (end-90)*Math.PI/180;
+                const x1 = cx + radius*Math.cos(radEnd);
+                const y1 = cy + radius*Math.sin(radEnd);
+                const x2 = cx + radius*Math.cos(radStart);
+                const y2 = cy + radius*Math.sin(radStart);
+                return `M ${x1} ${y1} A ${radius} ${radius} 0 0 0 ${x2} ${y2}`;
+            }
+
+            const zR = r - 4; 
+            const y1 = document.createElementNS(SVG_NS, "path");
+            y1.setAttribute("class", "zone-yellow");
+            y1.setAttribute("d", zoneArc(yellowThreshold, redThreshold, zR) + " " + zoneArc(-redThreshold, -yellowThreshold, zR));
+            svg.appendChild(y1);
+
+            const r1 = document.createElementNS(SVG_NS, "path");
+            r1.setAttribute("class", "zone-red");
+            r1.setAttribute("d", zoneArc(redThreshold, 60, zR) + " " + zoneArc(-60, -redThreshold, zR));
+            svg.appendChild(r1);
+
+            for(let i=-60; i<=60; i+=5) {
+                const p1 = polar(i);
+                const len = (i%15===0)? 6 : 3;
+                const rad = (i-90)*Math.PI/180;
+                const p2 = { x: cx + (r-len)*Math.cos(rad), y: cy + (r-len)*Math.sin(rad) };
+                
+                const line = document.createElementNS(SVG_NS, "line");
+                line.setAttribute("x1", p1.x); line.setAttribute("y1", p1.y);
+                line.setAttribute("x2", p2.x); line.setAttribute("y2", p2.y);
+                line.setAttribute("class", "gauge-tick");
+                svg.appendChild(line);
+            }
+
+            const tipY = cy - r - 2; 
+            const baseY = cy - r + 5; 
+            const pts = `50,${tipY} 47,${baseY} 53,${baseY}`;
+            
+            const needle = document.createElementNS(SVG_NS, "polygon");
+            needle.setAttribute("points", pts);
+            needle.setAttribute("class", "gauge-needle");
+            svg.appendChild(needle);
+        }
+
+        drawGauge('roll-svg');
+        drawGauge('pitch-svg');
+
+    </script>
+</body>
+</html>
